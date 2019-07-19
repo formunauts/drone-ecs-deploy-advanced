@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+
+AWS_CLI=$(which aws)
+ECS_CLI="$AWS_CLI --output json ecs"
+
+CLUSTER=false
+SERVICE=false
+COMMAND=false
+IMAGE="latest"
+TASK_DEFINITION=false
+MAX_DEFINITIONS=2
+NEW_DEF=false
+TIMEOUT=90
+
+function assumeRole() {
+  role=$(aws sts assume-role --role-arn $AWS_ASSUME_ROLE --role-session-name "$(date +"%s")")
+
+  export AWS_ACCESS_KEY_ID=$(echo $role | jq .Credentials.AccessKeyId | xargs)
+  export AWS_SECRET_ACCESS_KEY=$(echo $role | jq .Credentials.SecretAccessKey | xargs)
+  export AWS_SESSION_TOKEN=$(echo $role | jq .Credentials.SessionToken | xargs)
+}
+
+function resetAssumedRole() {
+  unset AWS_ACCESS_KEY_ID
+  unset AWS_SECRET_ACCESS_KEY
+  unset AWS_SESSION_TOKEN
+}
+
+function getCurrentTaskDefinition() {
+  if [ $SERVICE != false ]; then
+    service_task_definition_arn=$($ECS_CLI describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition)
+    task_definition_family=$($ECS_CLI describe-task-definition --task-def $service_task_definition_arn | jq -r .taskDefinition.family)
+
+    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition --task-def $task_definition_family | jq -r .taskDefinition.taskDefinitionArn)
+  elif [ $TASK_DEFINITION != false ]; then
+    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition --task-def $TASK_DEFINITION | jq -r .taskDefinition.taskDefinitionArn)
+  fi
+
+  TASK_DEFINITION=$($ECS_CLI describe-task-definition --task-def $TASK_DEFINITION_ARN)
+}
+
+function taskDefinitionJson() {
+  old_image=$(echo "$TASK_DEFINITION" | jq -r '.taskDefinition.containerDefinitions[0].image')
+
+  if [ $old_image == $IMAGE ]; then
+    return
+  fi
+
+  new_definition=$(echo "$TASK_DEFINITION" | jq '.taskDefinition')
+
+  filter="family: .family, volumes: .volumes, containerDefinitions: (.containerDefinitions | map(. + { image: \"${IMAGE}\" }))"
+
+  conditionals=(networkMode executionRoleArn taskRoleArn placementConstraints)
+  for conditional in "${conditionals[@]}"; do
+    re=".*${conditional}.*"
+    if [[ "$new_definition" =~ $re ]]; then
+    filter="${filter}, ${conditional}: .${conditional}"
+    fi
+  done
+
+  # AWS Fargate
+  compatibilities=$(echo "${new_definition}" | jq -r '. | select(.requiresCompatibilities != null) | .requiresCompatibilities[]')
+  if [[ "${compatibilities}" == 'FARGATE' ]]; then
+    fargate_filter='requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory'
+    filter="${filter}, ${fargate_filter}"
+  fi
+
+  NEW_DEF=$(echo "$new_definition" | jq "{${filter}}")
+}
+
+function registerNewTaskDefinition() {
+  TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition --cli-input-json "$NEW_DEF" \
+                        | jq -r '.taskDefinition.taskDefinitionArn')
+
+  if [[ $MAX_DEFINITIONS -gt 0 ]]; then
+    family_prefix=${TASK_DEFINITION_ARN##*:task-definition/}
+    family_prefix=${family_prefix%*:[0-9]*}
+    task_revisions=$($ECS_CLI list-task-definitions \
+                     --family-prefix $family_prefix \
+                     --status ACTIVE \
+                     --sort ASC)
+    active_revisions=$(echo "$task_revisions" | jq '.taskDefinitionArns | length')
+
+    if [[ $active_revisions -gt $MAX_DEFINITIONS ]]; then
+      last_outdated_index=$(($active_revisions - $MAX_DEFINITIONS - 1))
+      for i in $(seq 0 $last_outdated_index); do
+        outdated_revision=$(echo "$task_revisions" | jq -r ".taskDefinitionArns[$i]")
+        echo "Deregistering outdated task revision: $outdated_revision"
+
+        $ECS_CLI deregister-task-definition --task-definition "$outdated_revision" > /dev/null
+      done
+    fi
+  fi
+}
+
+function updateTaskDefinition() {
+  taskDefinitionJson
+
+  if [[ $NEW_DEF != false ]]; then
+    registerNewTaskDefinition
+
+    TASK_DEFINITION=$NEW_DEF
+  fi
+}
+
+function updateService() {
+  printf "Deploying service %s to %s..." $SERVICE $CLUSTER
+
+  $ECS_CLI update-service \
+    --cluster $CLUSTER \
+    --service $SERVICE \
+    --task-definition $TASK_DEFINITION_ARN \
+    --force-new-deployment \
+    > /dev/null
+}
+
+function runTask() {
+  override_filters="containerOverrides: (.containerDefinitions | map({ name: .name, command: [\"${COMMAND}\"] })), taskRoleArn: .taskRoleArn, executionRoleArn: .executionRoleArn"
+
+  overrides=$(echo "$TASK_DEFINITION" | jq ".taskDefinition | {$override_filters}")
+
+  printf "Running task %s on %s..." $TASK_DEFINITION_ARN $CLUSTER
+
+  $ECS_CLI run-task \
+    --cluster $CLUSTER \
+    --task-definition $TASK_DEFINITION_ARN \
+    --overrides "$overrides" \
+    > /dev/null
+}
+
+function waitForDeployment() {
+  DEPLOYMENT_SUCCESS=false
+  every=2
+  count=0
+
+  while [ $count -lt $TIMEOUT ]; do
+    NUM_DEPLOYMENTS=$($ECS_CLI describe-services \
+                      --services $SERVICE \
+                      --cluster $CLUSTER \
+                      | jq "[.services[].deployments[]] | length")
+
+    if [ $NUM_DEPLOYMENTS -eq 1 ]; then
+      echo "Service deployment successful."
+      DEPLOYMENT_SUCCESS="true"
+      count=$TIMEOUT
+    else
+      sleep $every
+      count=$(($count + $every))
+    fi
+  done
+
+  if [[ "${DEPLOYMENT_SUCCESS}" != "true" ]]; then
+    exit 1
+  fi
+}
+
+#
+# Run the script
+#
+set -o errexit
+set -o pipefail
+set -u
+set -e
+
+if [ $# == 0 ]; then exit 2; fi
+
+while [[ $# -gt 0 ]]
+do
+  key="$1"
+
+  case $key in
+    -a|--aws-assume-role)
+    AWS_ASSUME_ROLE="$2"
+    shift
+    ;;
+    -c|--cluster)
+    CLUSTER="$2"
+    shift
+    ;;
+    -i|--image)
+    IMAGE="$2"
+    shift
+    ;;
+    -s|--service)
+    SERVICE="$2"
+    shift
+    ;;
+    -C|--command)
+    COMMAND="$2"
+    shift
+    ;;
+    -d|--task-definition)
+    TASK_DEFINITION="$2"
+    shift
+    ;;
+    -t|--timeout)
+    TIMEOUT="$2"
+    shift
+    ;;
+    -r|--region)
+    ECS_CLI="$ECS_CLI --region $2"
+    shift
+    ;;
+    *)
+    echo "unknown argument: ${key}"
+    exit 2
+    ;;
+  esac
+  shift # past argument or value
+done
+
+assumeRole
+
+getCurrentTaskDefinition
+echo "Current task definition ARN: $TASK_DEFINITION_ARN"
+
+updateTaskDefinition
+echo "New task definition ARN: $TASK_DEFINITION_ARN"
+
+if [ $SERVICE == false ]; then
+  if [[ $COMMAND != false ]]; then
+    runTask
+  fi
+else
+  updateService
+  waitForDeployment
+fi
+
+resetAssumedRole
+
+exit 0
