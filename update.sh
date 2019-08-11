@@ -26,7 +26,7 @@ if [ -z ${PLUGIN_REGION} ]; then
   PLUGIN_REGION="eu-central-1"
 fi
 
-if [ -z ${PLUGIN_DEBUG} ]; then
+if [ "${PLUGIN_DEBUG}" == "true" ]; then
   DEBUG="--debug"
 fi
 
