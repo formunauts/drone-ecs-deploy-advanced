@@ -1,5 +1,7 @@
 #!/bin/bash
 
+DEBUG=""
+
 if [ -z ${PLUGIN_ROLE} ]; then
   echo "You must specify a role to assume"
   exit 1
@@ -24,13 +26,18 @@ if [ -z ${PLUGIN_REGION} ]; then
   PLUGIN_REGION="eu-central-1"
 fi
 
+if [ -z ${PLUGIN_DEBUG} ]; then
+  DEBUG="--debug"
+fi
+
 IFS=','
 services=($PLUGIN_SERVICES)
 tasks=($PLUGIN_TASKS)
 
 # Run one-off tasks
 for command in "${!tasks[@]}"; do
-  ecs-deploy -r ${PLUGIN_REGION} \
+  ecs-deploy $DEBUG \
+             -r ${PLUGIN_REGION} \
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
@@ -42,7 +49,8 @@ done
 
 # Deploy services
 for service in "${!services[@]}"; do
-  ecs-deploy -r ${PLUGIN_REGION} \
+  ecs-deploy $DEBUG \
+             -r ${PLUGIN_REGION} \
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE} \
              -t ${PLUGIN_TIMEOUT:-300} \

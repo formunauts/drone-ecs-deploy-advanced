@@ -11,9 +11,10 @@ TASK_DEFINITION=false
 MAX_DEFINITIONS=2
 NEW_DEF=false
 TIMEOUT=90
+DEBUG=""
 
 function assumeRole() {
-  role=$(aws sts assume-role --role-arn $AWS_ASSUME_ROLE --role-session-name "$(date +"%s")")
+  role=$(aws sts assume-role $DEBUG --role-arn $AWS_ASSUME_ROLE --role-session-name "$(date +"%s")")
 
   export AWS_ACCESS_KEY_ID=$(echo $role | jq .Credentials.AccessKeyId | xargs)
   export AWS_SECRET_ACCESS_KEY=$(echo $role | jq .Credentials.SecretAccessKey | xargs)
@@ -28,15 +29,15 @@ function resetAssumedRole() {
 
 function getCurrentTaskDefinition() {
   if [ $SERVICE != false ]; then
-    service_task_definition_arn=$($ECS_CLI describe-services --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition)
-    task_definition_family=$($ECS_CLI describe-task-definition --task-def $service_task_definition_arn | jq -r .taskDefinition.family)
+    service_task_definition_arn=$($ECS_CLI describe-services $DEBUG --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition)
+    task_definition_family=$($ECS_CLI describe-task-definition $DEBUG --task-def $service_task_definition_arn | jq -r .taskDefinition.family)
 
-    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition --task-def $task_definition_family | jq -r .taskDefinition.taskDefinitionArn)
+    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition $DEBUG --task-def $task_definition_family | jq -r .taskDefinition.taskDefinitionArn)
   elif [ $TASK_DEFINITION != false ]; then
-    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition --task-def $TASK_DEFINITION | jq -r .taskDefinition.taskDefinitionArn)
+    TASK_DEFINITION_ARN=$($ECS_CLI describe-task-definition $DEBUG --task-def $TASK_DEFINITION | jq -r .taskDefinition.taskDefinitionArn)
   fi
 
-  TASK_DEFINITION=$($ECS_CLI describe-task-definition --task-def $TASK_DEFINITION_ARN)
+  TASK_DEFINITION=$($ECS_CLI describe-task-definition $DEBUG --task-def $TASK_DEFINITION_ARN)
 }
 
 function taskDefinitionJson() {
@@ -69,13 +70,13 @@ function taskDefinitionJson() {
 }
 
 function registerNewTaskDefinition() {
-  TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition --cli-input-json "$NEW_DEF" \
+  TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF" \
                         | jq -r '.taskDefinition.taskDefinitionArn')
 
   if [[ $MAX_DEFINITIONS -gt 0 ]]; then
     family_prefix=${TASK_DEFINITION_ARN##*:task-definition/}
     family_prefix=${family_prefix%*:[0-9]*}
-    task_revisions=$($ECS_CLI list-task-definitions \
+    task_revisions=$($ECS_CLI list-task-definitions $DEBUG \
                      --family-prefix $family_prefix \
                      --status ACTIVE \
                      --sort ASC)
@@ -87,7 +88,7 @@ function registerNewTaskDefinition() {
         outdated_revision=$(echo "$task_revisions" | jq -r ".taskDefinitionArns[$i]")
         echo "Deregistering outdated task revision: $outdated_revision"
 
-        $ECS_CLI deregister-task-definition --task-definition "$outdated_revision" > /dev/null
+        $ECS_CLI deregister-task-definition $DEBUG --task-definition "$outdated_revision" > /dev/null
       done
     fi
   fi
@@ -106,7 +107,7 @@ function updateTaskDefinition() {
 function updateService() {
   printf "Deploying service %s to %s..." $SERVICE $CLUSTER
 
-  $ECS_CLI update-service \
+  $ECS_CLI update-service $DEBUG \
     --cluster $CLUSTER \
     --service $SERVICE \
     --task-definition $TASK_DEFINITION_ARN \
@@ -121,7 +122,7 @@ function runTask() {
 
   printf "Running task %s on %s..." $TASK_DEFINITION_ARN $CLUSTER
 
-  $ECS_CLI run-task \
+  $ECS_CLI run-task $DEBUG \
     --cluster $CLUSTER \
     --task-definition $TASK_DEFINITION_ARN \
     --overrides "$overrides" \
@@ -134,7 +135,7 @@ function waitForDeployment() {
   count=0
 
   while [ $count -lt $TIMEOUT ]; do
-    NUM_DEPLOYMENTS=$($ECS_CLI describe-services \
+    NUM_DEPLOYMENTS=$($ECS_CLI describe-services $DEBUG \
                       --services $SERVICE \
                       --cluster $CLUSTER \
                       | jq "[.services[].deployments[]] | length")
@@ -200,6 +201,9 @@ do
     -r|--region)
     ECS_CLI="$ECS_CLI --region $2"
     shift
+    ;;
+    --debug)
+    DEBUG="--debug"
     ;;
     *)
     echo "unknown argument: ${key}"
