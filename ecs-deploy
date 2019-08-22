@@ -116,11 +116,19 @@ function updateService() {
 }
 
 function runTask() {
+  printf "Running task %s on %s..." $TASK_DEFINITION_ARN $CLUSTER
+  
   override_filters="containerOverrides: (.containerDefinitions | map({ name: .name, command: [\"${COMMAND}\"] })), taskRoleArn: .taskRoleArn, executionRoleArn: .executionRoleArn"
-
+  
+  if [[ $DEBUG != "" ]]; then
+    printf "JQ command: .taskDefinition | {%s}" $override_filters 
+  fi
+  
   overrides=$(echo "$TASK_DEFINITION" | jq ".taskDefinition | {$override_filters}")
 
-  printf "Running task %s on %s..." $TASK_DEFINITION_ARN $CLUSTER
+  if [[ $DEBUG != "" ]]; then
+    printf "Using overrides: %s" $overrides
+  fi
 
   $ECS_CLI run-task $DEBUG \
     --cluster $CLUSTER \
@@ -231,5 +239,7 @@ else
 fi
 
 resetAssumedRole
+
+print ""
 
 exit 0
