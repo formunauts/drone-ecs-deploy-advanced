@@ -221,6 +221,8 @@ do
   shift # past argument or value
 done
 
+echo ""
+
 assumeRole
 
 getCurrentTaskDefinition
@@ -240,6 +242,6 @@ fi
 
 resetAssumedRole
 
-print ""
+echo ""
 
 exit 0
