@@ -14,7 +14,7 @@ TIMEOUT=90
 DEBUG=""
 
 function assumeRole() {
-  printf "Assuming role..."
+  echo "Assuming role..."
 
   role=$(aws sts assume-role $DEBUG --role-arn $AWS_ASSUME_ROLE --role-session-name "$(date +"%s")")
 
@@ -24,7 +24,7 @@ function assumeRole() {
 }
 
 function resetAssumedRole() {
-  printf "Resetting asumed role..."
+  echo "Resetting asumed role..."
 
   unset AWS_ACCESS_KEY_ID
   unset AWS_SECRET_ACCESS_KEY
@@ -32,7 +32,7 @@ function resetAssumedRole() {
 }
 
 function getCurrentTaskDefinition() {
-  printf "Getting current task definition..."
+  echo "Getting current task definition..."
 
   if [ $SERVICE != false ]; then
     service_task_definition_arn=$($ECS_CLI describe-services $DEBUG --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition)
@@ -47,7 +47,7 @@ function getCurrentTaskDefinition() {
 }
 
 function taskDefinitionJson() {
-  printf "Parsing task definition JSON..."
+  echo "Parsing task definition JSON..."
 
   old_image=$(echo "$TASK_DEFINITION" | jq -r '.taskDefinition.containerDefinitions[0].image')
 
@@ -78,7 +78,7 @@ function taskDefinitionJson() {
 }
 
 function registerNewTaskDefinition() {
-  printf "Registering new task definition..."
+  echo "Registering new task definition..."
 
   TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF" \
                         | jq -r '.taskDefinition.taskDefinitionArn')
@@ -105,7 +105,7 @@ function registerNewTaskDefinition() {
 }
 
 function updateTaskDefinition() {
-  printf "Updating task definition..."
+  echo "Updating task definition..."
 
   taskDefinitionJson
 
@@ -117,7 +117,7 @@ function updateTaskDefinition() {
 }
 
 function deployService() {
-  printf "Deploying service %s to %s..." $SERVICE $CLUSTER
+  printf "Deploying service %s to %s...\n" $SERVICE $CLUSTER
 
   $ECS_CLI update-service $DEBUG \
     --cluster $CLUSTER \
@@ -128,18 +128,18 @@ function deployService() {
 }
 
 function runTask() {
-  printf "Running task %s on %s..." $TASK_DEFINITION_ARN $CLUSTER
+  printf "Running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
   
   override_filters="containerOverrides: (.containerDefinitions | map({ name: .name, command: [\"${COMMAND}\"] })), taskRoleArn: .taskRoleArn, executionRoleArn: .executionRoleArn"
   
   if [[ $DEBUG != "" ]]; then
-    printf "JQ command: .taskDefinition | {%s}" $override_filters 
+    printf "JQ command: .taskDefinition | {%s}\n" $override_filters 
   fi
   
   overrides=$(echo "$TASK_DEFINITION" | jq ".taskDefinition | {$override_filters}")
 
   if [[ $DEBUG != "" ]]; then
-    printf "Using overrides: %s" $overrides
+    printf "Using overrides: %s\n" $overrides
   fi
 
   $ECS_CLI run-task $DEBUG \
@@ -150,7 +150,7 @@ function runTask() {
 }
 
 function waitForDeployment() {
-  printf "Waiting for service deployment..."
+  echo "Waiting for service deployment to finish..."
 
   DEPLOYMENT_SUCCESS=false
   every=2
@@ -163,7 +163,7 @@ function waitForDeployment() {
                       | jq "[.services[].deployments[]] | length")
 
     if [ $NUM_DEPLOYMENTS -eq 1 ]; then
-      printf "Service deployment successful."
+      echo "Service deployment finished successfully!"
       DEPLOYMENT_SUCCESS="true"
       count=$TIMEOUT
     else
@@ -235,15 +235,15 @@ do
   shift # past argument or value
 done
 
-echo ""
+echo "Starting deployment to ECS..."
 
 assumeRole
 
 getCurrentTaskDefinition
-echo "Current task definition ARN: $TASK_DEFINITION_ARN"
+printf "Current task definition ARN: %s\n" $TASK_DEFINITION_ARN
 
 updateTaskDefinition
-echo "New task definition ARN: $TASK_DEFINITION_ARN"
+printf "New task definition ARN: %s\n" $TASK_DEFINITION_ARN
 
 if [ $SERVICE == false ]; then
   if [[ $COMMAND != false ]]; then
@@ -256,6 +256,7 @@ fi
 
 resetAssumedRole
 
-echo "Everything done!"
+echo "Everything done."
+echo "Have a nice day!"
 
 exit 0
