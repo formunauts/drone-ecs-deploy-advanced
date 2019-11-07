@@ -173,6 +173,9 @@ function waitForDeployment() {
   done
 
   if [[ "${DEPLOYMENT_SUCCESS}" != "true" ]]; then
+    printf "Number of deployments: %s" $NUM_DEPLOYMENTS
+    echo "Service deployment not successful!"
+    echo "Aborting!"
     exit 1
   fi
 }
