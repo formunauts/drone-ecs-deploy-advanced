@@ -14,6 +14,8 @@ TIMEOUT=90
 DEBUG=""
 
 function assumeRole() {
+  printf "Assuming role..."
+
   role=$(aws sts assume-role $DEBUG --role-arn $AWS_ASSUME_ROLE --role-session-name "$(date +"%s")")
 
   export AWS_ACCESS_KEY_ID=$(echo $role | jq .Credentials.AccessKeyId | xargs)
@@ -22,12 +24,16 @@ function assumeRole() {
 }
 
 function resetAssumedRole() {
+  printf "Resetting asumed role..."
+
   unset AWS_ACCESS_KEY_ID
   unset AWS_SECRET_ACCESS_KEY
   unset AWS_SESSION_TOKEN
 }
 
 function getCurrentTaskDefinition() {
+  printf "Getting current task definition..."
+
   if [ $SERVICE != false ]; then
     service_task_definition_arn=$($ECS_CLI describe-services $DEBUG --services $SERVICE --cluster $CLUSTER | jq -r .services[0].taskDefinition)
     task_definition_family=$($ECS_CLI describe-task-definition $DEBUG --task-def $service_task_definition_arn | jq -r .taskDefinition.family)
@@ -41,6 +47,8 @@ function getCurrentTaskDefinition() {
 }
 
 function taskDefinitionJson() {
+  printf "Parsing task definition JSON..."
+
   old_image=$(echo "$TASK_DEFINITION" | jq -r '.taskDefinition.containerDefinitions[0].image')
 
   if [ $old_image == $IMAGE ]; then
@@ -70,6 +78,8 @@ function taskDefinitionJson() {
 }
 
 function registerNewTaskDefinition() {
+  printf "Registering new task definition..."
+
   TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF" \
                         | jq -r '.taskDefinition.taskDefinitionArn')
 
@@ -95,6 +105,8 @@ function registerNewTaskDefinition() {
 }
 
 function updateTaskDefinition() {
+  printf "Updating task definition..."
+
   taskDefinitionJson
 
   if [[ $NEW_DEF != false ]]; then
@@ -104,7 +116,7 @@ function updateTaskDefinition() {
   fi
 }
 
-function updateService() {
+function deployService() {
   printf "Deploying service %s to %s..." $SERVICE $CLUSTER
 
   $ECS_CLI update-service $DEBUG \
@@ -138,6 +150,8 @@ function runTask() {
 }
 
 function waitForDeployment() {
+  printf "Waiting for service deployment..."
+
   DEPLOYMENT_SUCCESS=false
   every=2
   count=0
@@ -149,7 +163,7 @@ function waitForDeployment() {
                       | jq "[.services[].deployments[]] | length")
 
     if [ $NUM_DEPLOYMENTS -eq 1 ]; then
-      echo "Service deployment successful."
+      printf "Service deployment successful."
       DEPLOYMENT_SUCCESS="true"
       count=$TIMEOUT
     else
@@ -236,12 +250,12 @@ if [ $SERVICE == false ]; then
     runTask
   fi
 else
-  updateService
+  deployService
   waitForDeployment
 fi
 
 resetAssumedRole
 
-echo ""
+echo "Everything done!"
 
 exit 0
