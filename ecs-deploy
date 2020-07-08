@@ -238,7 +238,8 @@ do
   shift # past argument or value
 done
 
-echo "Starting deployment to ECS..."
+printf "---"
+printf "Starting deployment of %s to ECS...\n" $SERVICE 
 
 assumeRole
 
@@ -259,7 +260,6 @@ fi
 
 resetAssumedRole
 
-echo "Everything done."
-echo "Have a nice day!"
+echo "Everything done for %s. Have a nice day!\n" $SERVICE
 
 exit 0
