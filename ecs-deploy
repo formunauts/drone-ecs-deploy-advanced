@@ -249,7 +249,7 @@ do
   shift # past argument or value
 done
 
-printf "---"
+echo "---"
 printf "Starting deployment of %s to ECS...\n" $SERVICE 
 
 assumeRole
