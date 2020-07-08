@@ -271,6 +271,6 @@ fi
 
 resetAssumedRole
 
-echo "Everything done for %s. Have a nice day!\n" $SERVICE
+printf "Everything done for %s. Have a nice day! \n" $SERVICE
 
 exit 0
