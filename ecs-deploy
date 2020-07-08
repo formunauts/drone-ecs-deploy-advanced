@@ -44,6 +44,8 @@ function getCurrentTaskDefinition() {
   fi
 
   TASK_DEFINITION=$($ECS_CLI describe-task-definition $DEBUG --task-def $TASK_DEFINITION_ARN)
+
+  echo "Done getting current task definition..."
 }
 
 function taskDefinitionJson() {
@@ -75,6 +77,7 @@ function taskDefinitionJson() {
   fi
 
   NEW_DEF=$(echo "$new_definition" | jq "{${filter}}")
+  echo "Done parsing task definition JSON..."
 }
 
 function registerNewTaskDefinition() {
@@ -102,6 +105,8 @@ function registerNewTaskDefinition() {
       done
     fi
   fi
+
+  echo "Done registering new task definition..."
 }
 
 function updateTaskDefinition() {
@@ -114,6 +119,8 @@ function updateTaskDefinition() {
 
     TASK_DEFINITION=$NEW_DEF
   fi
+
+  echo "Done updating task definition..."
 }
 
 function deployService() {
@@ -123,8 +130,9 @@ function deployService() {
     --cluster $CLUSTER \
     --service $SERVICE \
     --task-definition $TASK_DEFINITION_ARN \
-    --force-new-deployment \
-    > /dev/null
+    --force-new-deployment
+
+  printf "Done deploying service %s to %s...\n" $SERVICE $CLUSTER
 }
 
 function runTask() {
@@ -145,8 +153,9 @@ function runTask() {
   $ECS_CLI run-task $DEBUG \
     --cluster $CLUSTER \
     --task-definition $TASK_DEFINITION_ARN \
-    --overrides "$overrides" \
-    > /dev/null
+    --overrides "$overrides"
+
+  printf "Done running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
 }
 
 function waitForDeployment() {
@@ -163,6 +172,7 @@ function waitForDeployment() {
                       | jq "[.services[].deployments[]] | length")
 
     if [ $NUM_DEPLOYMENTS -eq 1 ]; then
+      echo "Done waiting for service deployment to finish..."
       echo "Service deployment finished successfully!"
       DEPLOYMENT_SUCCESS="true"
       count=$TIMEOUT
@@ -173,6 +183,7 @@ function waitForDeployment() {
   done
 
   if [[ "${DEPLOYMENT_SUCCESS}" != "true" ]]; then
+    echo "Done waiting for service deployment to finish..."
     printf "Number of deployments: %s" $NUM_DEPLOYMENTS
     echo "Service deployment not successful!"
     echo "Aborting!"
