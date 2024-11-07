@@ -1,16 +1,12 @@
-FROM alpine:3.9
+FROM alpine:3.20
 
 RUN apk add --update --no-cache \
     curl \
     jq \
     ca-certificates \
     bash \
-    python \
-    && python -m ensurepip \
-    && rm -r /usr/lib/python*/ensurepip \
-    && pip install --upgrade pip setuptools \
-    awscli --ignore-installed \
-    && rm -r /root/.cache
+    aws-cli \
+    && rm -rf /var/cache/apk/*
 
 COPY update.sh /bin/
 COPY ecs-deploy /bin/
