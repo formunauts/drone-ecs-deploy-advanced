@@ -2,11 +2,12 @@
 
 AWS_CLI=$(which aws)
 ECS_CLI="$AWS_CLI --output json ecs"
+SSM_CLI="$AWS_CLI --output json ssm"
 
 CLUSTER=false
 SERVICE=false
 COMMAND=false
-WAIT=false
+EXEC=false
 IMAGE="latest"
 TASK_DEFINITION=false
 MAX_DEFINITIONS=2
@@ -136,6 +137,61 @@ function deployService() {
   printf "Done deploying service %s to %s...\n" $SERVICE $CLUSTER
 }
 
+execCommand() {
+  printf "Executing command '%s' in service %s of %s...\n" "$COMMAND" $SERVICE $CLUSTER
+
+  EXEC_SUCCESS=false
+
+  current_task_arns="$(
+    $ECS_CLI list-tasks $DEBUG \
+      --cluster "$CLUSTER" \
+      --family "$SERVICE" \
+      --query 'taskArns' |
+      jq -r '.[]'
+  )"
+  container_instances="$(
+    $ECS_CLI describe-tasks $DEBUG \
+      --cluster "$CLUSTER" \
+      --tasks $current_task_arns \
+      --query 'tasks[*].containerInstanceArn' |
+      jq -r '.[]'
+  )"
+  for container in $container_instances; do
+    ec2_instance_id=$(
+      $ECS_CLI describe-container-instances $DEBUG \
+        --cluster "$CLUSTER" \
+        --container-instances "$container" \
+        --region eu-central-1 \
+        --query 'containerInstances[*].ec2InstanceId' |
+        jq -r '.[]'
+    )
+    docker_ps_output=$(
+      $SSM_CLI start-session $DEBUG \
+        --target $ec2_instance_id \
+        --document-name 'AWS-StartNonInteractiveCommand' \
+        --parameters '{"command": ["sudo docker ps --filter name='"$SERVICE"'"]}'
+    )
+    container_id=$(echo $docker_ps_output | cut -d ' ' -f 14)
+
+    printf "Starting session in docker container %s of EC2 instance %s...\n" "$COMMAND" $container_id $ec2_instance_id
+
+    $SSM_CLI start-session $DEBUG \
+      --target $ec2_instance_id \
+      --document-name 'AWS-StartNonInteractiveCommand' \
+      --parameters '{"command": ["sudo docker exec '"$container_id"' '"$COMMAND"'"]}'
+
+    EXEC_SUCCESS=true
+    printf "Done executing command '%s'...\n" "$COMMAND"
+    break
+  done
+
+  if [[ "${EXEC_SUCCESS}" != "true" ]]; then
+    echo "No Docker container was found for executing the command!"
+    echo "Aborting!"
+    exit 1
+  fi
+}
+
 function runTask() {
   printf "Running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
   
@@ -151,45 +207,12 @@ function runTask() {
     printf "Using overrides: %s\n" $overrides
   fi
 
-  task=$($ECS_CLI run-task $DEBUG \
+  $ECS_CLI run-task $DEBUG \
     --cluster $CLUSTER \
     --task-definition $TASK_DEFINITION_ARN \
-    --overrides "$overrides")
-
-  printf "$task\n"
-
-  TASK_ARN=$(echo "$task" | jq -r ".tasks[0].taskArn")
+    --overrides "$overrides"
 
   printf "Done running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
-}
-
-function waitForTask() {
-  printf "Waiting for task %s on %s to finish..." $TASK_ARN $CLUSTER
-
-  every=2
-  count=0
-
-  while [ $count -lt $TIMEOUT ]; do
-    task=$($ECS_CLI describe-tasks $DEBUG \
-      --cluster $CLUSTER \
-      --tasks $TASK_ARN)
-    LAST_STATUS=$(echo "$task" | jq -r ".tasks[0].lastStatus")
-    if [ $LAST_STATUS == "STOPPED" ]; then
-      echo "Done waiting for task to finish..."
-      EXIT_CODE=$(echo $task | jq -r ".tasks[0].containers[0].exitCode")
-      if [ $EXIT_CODE -eq 0 ]; then
-        echo "Task finished successfully!"
-        count=$TIMEOUT
-      else
-        echo "Task not successful!"
-        echo "Aborting!"
-        exit 1
-      fi
-    else
-      sleep $every
-      count=$(($count + $every))
-    fi
-  done
 }
 
 function waitForDeployment() {
@@ -260,8 +283,8 @@ do
     COMMAND="$2"
     shift
     ;;
-    -w | --wait)
-    WAIT=true
+    -e | --exec)
+    EXEC=true
     ;;
     -d|--task-definition)
     TASK_DEFINITION="$2"
@@ -291,22 +314,23 @@ printf "Starting deployment of %s to ECS...\n" $SERVICE
 
 assumeRole
 
-getCurrentTaskDefinition
-printf "Current task definition ARN: %s\n" $TASK_DEFINITION_ARN
-
-updateTaskDefinition
-printf "New task definition ARN: %s\n" $TASK_DEFINITION_ARN
-
-if [ $SERVICE == false ]; then
-  if [[ $COMMAND != false ]]; then
-    runTask
-    if [[ $WAIT != false ]]; then
-      waitForTask
-    fi
-  fi
+if [[ $SERVICE != false && "$COMMAND" != false && $EXEC != false ]]; then
+  execCommand
 else
-  deployService
-  waitForDeployment
+  getCurrentTaskDefinition
+  printf "Current task definition ARN: %s\n" $TASK_DEFINITION_ARN
+
+  updateTaskDefinition
+  printf "New task definition ARN: %s\n" $TASK_DEFINITION_ARN
+
+  if [ $SERVICE == false ]; then
+    if [[ "$COMMAND" != false ]]; then
+      runTask
+    fi
+  else
+    deployService
+    waitForDeployment
+  fi
 fi
 
 resetAssumedRole
