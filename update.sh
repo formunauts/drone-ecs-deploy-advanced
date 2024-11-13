@@ -12,12 +12,12 @@ if [ -z ${PLUGIN_CLUSTER} ]; then
   exit 1
 fi
 
-if [[ -z ${PLUGIN_SERVICES} && -z $PLUGIN_TASKS && -z $PLUGIN_COMMANDS ]]; then
-  echo "You must specify either services, tasks or commands (or several of them)"
+if [[ -z ${PLUGIN_SERVICES} && -z $PLUGIN_TASKS && -z $PLUGIN_EXEC_COMMANDS ]]; then
+  echo "You must specify either services, tasks or exec_commands (or several of them)"
   exit 1
 fi
 
-if [[ ! -z ${PLUGIN_COMMANDS} && -z ${PLUGIN_EXEC_SERVICE} ]]; then
+if [[ ! -z ${PLUGIN_EXEC_COMMANDS} && -z ${PLUGIN_EXEC_SERVICE} ]]; then
   echo "You must specify an execution service, when using commands"
   exit 1
 fi
@@ -37,11 +37,11 @@ fi
 
 IFS=','
 services=($PLUGIN_SERVICES)
-commands=($PLUGIN_COMMANDS)
+exec_commands=($PLUGIN_EXEC_COMMANDS)
 tasks=($PLUGIN_TASKS)
 
 # Run commands
-for command in "${!commands[@]}"; do
+for command in "${!exec_commands[@]}"; do
   ecs-deploy $DEBUG --exec \
              -r ${PLUGIN_REGION} \
              -c ${PLUGIN_CLUSTER} \
@@ -49,7 +49,7 @@ for command in "${!commands[@]}"; do
              -t ${PLUGIN_TIMEOUT:-300} \
              -a ${PLUGIN_ROLE} \
              -s ${PLUGIN_EXEC_SERVICE} \
-             -C "${commands[$command]}"
+             -C "${exec_commands[$command]}"
 done
 
 # Run one-off tasks
