@@ -1,16 +1,13 @@
-FROM alpine:3.9
+FROM alpine:3.20
 
 RUN apk add --update --no-cache \
     curl \
     jq \
     ca-certificates \
     bash \
-    python \
-    && python -m ensurepip \
-    && rm -r /usr/lib/python*/ensurepip \
-    && pip install --upgrade pip setuptools \
-    awscli --ignore-installed \
-    && rm -r /root/.cache
+    aws-cli \
+    && apk add --update --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/community \
+    aws-session-manager-plugin
 
 COPY update.sh /bin/
 COPY ecs-deploy /bin/
