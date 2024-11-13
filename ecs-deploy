@@ -2,7 +2,7 @@
 
 AWS_CLI=$(which aws)
 ECS_CLI="$AWS_CLI --output json ecs"
-SSM_CLI="$AWS_CLI --output json ssm"
+SSM_CLI="unbuffer $AWS_CLI --output json ssm"
 
 CLUSTER=false
 SERVICE=false
@@ -173,7 +173,7 @@ execCommand() {
     )
     container_id=$(echo $docker_ps_output | cut -d ' ' -f 14)
 
-    printf "Starting session in docker container %s of EC2 instance %s...\n" "$COMMAND" $container_id $ec2_instance_id
+    printf "Starting session in docker container %s of EC2 instance %s...\n" $container_id $ec2_instance_id
 
     $SSM_CLI start-session $DEBUG \
       --target $ec2_instance_id \
