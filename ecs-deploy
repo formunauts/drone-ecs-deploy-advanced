@@ -2,7 +2,7 @@
 
 AWS_CLI=$(which aws)
 ECS_CLI="$AWS_CLI --output json ecs"
-SSM_CLI="unbuffer $AWS_CLI --output json ssm"
+SSM_CLI="$AWS_CLI --output json ssm"
 
 CLUSTER=false
 SERVICE=false
@@ -137,6 +137,23 @@ function deployService() {
   printf "Done deploying service %s to %s...\n" $SERVICE $CLUSTER
 }
 
+waitForSSMCommand() {
+  every=2
+  count=0
+
+  while [ $count -lt $TIMEOUT ]; do
+    details=$($SSM_CLI list-command-invocations --command-id "$SSM_COMMAND_ID" --details)
+    COMMAND_OUTPUT=$(echo "$details" | jq -r '.CommandInvocations[].CommandPlugins[].Output')
+    COMMAND_EXIT_CODE=$(echo "$details" | jq -r '.CommandInvocations[].CommandPlugins[].ResponseCode')
+    if [ $COMMAND_EXIT_CODE -gt -1 ]; then
+      break
+    else
+      sleep $every
+      count=$(($count + $every))
+    fi
+  done
+}
+
 execCommand() {
   printf "Executing command '%s' in service %s of %s...\n" "$COMMAND" $SERVICE $CLUSTER
 
@@ -157,7 +174,7 @@ execCommand() {
       jq -r '.[]'
   )"
   for container in $container_instances; do
-    ec2_instance_id=$(
+    EC2_INSTANCE_ID=$(
       $ECS_CLI describe-container-instances $DEBUG \
         --cluster "$CLUSTER" \
         --container-instances "$container" \
@@ -165,23 +182,32 @@ execCommand() {
         --query 'containerInstances[*].ec2InstanceId' |
         jq -r '.[]'
     )
-    docker_ps_output=$(
-      $SSM_CLI start-session $DEBUG \
-        --target $ec2_instance_id \
-        --document-name 'AWS-StartNonInteractiveCommand' \
-        --parameters '{"command": ["sudo docker ps --filter name='"$SERVICE"'"]}'
-    )
-    container_id=$(echo $docker_ps_output | cut -d ' ' -f 14)
+    SSM_COMMAND_ID=$($SSM_CLI send-command $DEBUG \
+                     --instance-ids "$EC2_INSTANCE_ID" \
+                     --document-name 'AWS-RunShellScript' \
+                     --parameters '{"commands": ["sudo docker ps --filter name='"$SERVICE"'"]}' |
+                     jq -r '.Command.CommandId')
+    waitForSSMCommand
+    if [ $COMMAND_EXIT_CODE -gt 0 ]; then
+      continue
+    fi
+    container_id=$(echo $COMMAND_OUTPUT | cut -d ' ' -f 9)
 
-    printf "Starting session in docker container %s of EC2 instance %s...\n" $container_id $ec2_instance_id
+    printf "Executing in docker container %s of EC2 instance %s...\n" $container_id $EC2_INSTANCE_ID
 
-    $SSM_CLI start-session $DEBUG \
-      --target $ec2_instance_id \
-      --document-name 'AWS-StartNonInteractiveCommand' \
-      --parameters '{"command": ["sudo docker exec '"$container_id"' '"$COMMAND"'"]}'
-
-    EXEC_SUCCESS=true
-    printf "Done executing command '%s'...\n" "$COMMAND"
+    SSM_COMMAND_ID=$($SSM_CLI send-command $DEBUG \
+                     --instance-ids "$EC2_INSTANCE_ID" \
+                     --document-name 'AWS-RunShellScript' \
+                     --parameters '{"commands": ["sudo docker exec '"$container_id"' '"$COMMAND"'"]}' |
+                     jq -r '.Command.CommandId')
+    waitForSSMCommand
+    if [ $COMMAND_EXIT_CODE -eq 0 ]; then
+      echo "----------------------------------------"
+      echo "$COMMAND_OUTPUT"
+      echo "----------------------------------------"
+      EXEC_SUCCESS=true
+      printf "Done executing command '%s'...\n" "$COMMAND"
+    fi
     break
   done
 

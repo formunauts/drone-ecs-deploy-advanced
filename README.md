@@ -24,8 +24,8 @@ run simultaneously with the updating of the services.
 
 If `exec_commands` are set it's also required to provide an `exec_service` where
 they will be executed. This can be used to specify commands that need to run
-sequentially before any `services` are deployed or `tasks` are started (but an
-unsuccessful exit code will not stop the deployment process).
+sequentially and complete successfully before any `services` are deployed or
+`tasks` are started.
 
 ```yaml
 steps:

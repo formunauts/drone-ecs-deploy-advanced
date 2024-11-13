@@ -6,7 +6,6 @@ RUN apk add --update --no-cache \
     ca-certificates \
     bash \
     aws-cli \
-    expect \
     && apk add --update --no-cache -X http://dl-cdn.alpinelinux.org/alpine/edge/community \
     aws-session-manager-plugin
 
