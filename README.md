@@ -50,6 +50,17 @@ steps:
   ...
 ```
 
+## Release Process
+
+To build a new docker image of `drone-ecs-deploy-advanced` and push it to the
+Docker hub, use the following commands:
+
+```sh
+VERSION=1.1.0
+docker build -t "formunauts/drone-ecs-deploy-advanced:$VERSION" .
+docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
+```
+
 ## License
 
 See [LICENSE](LICENSE) for full details.
