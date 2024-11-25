@@ -7,6 +7,7 @@ SSM_CLI="$AWS_CLI --output json ssm"
 CLUSTER=false
 SERVICE=false
 COMMAND=false
+WAIT=false
 EXEC=false
 IMAGE="latest"
 TASK_DEFINITION=false
@@ -233,12 +234,45 @@ function runTask() {
     printf "Using overrides: %s\n" $overrides
   fi
 
-  $ECS_CLI run-task $DEBUG \
+  task=$($ECS_CLI run-task $DEBUG \
     --cluster $CLUSTER \
     --task-definition $TASK_DEFINITION_ARN \
-    --overrides "$overrides"
+    --overrides "$overrides")
+
+  printf "$task\n"
+
+  TASK_ARN=$(echo "$task" | jq -r ".tasks[0].taskArn")
 
   printf "Done running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
+}
+
+function waitForTask() {
+  printf "Waiting for task %s on %s to finish..." $TASK_ARN $CLUSTER
+
+  every=2
+  count=0
+
+  while [ $count -lt $TIMEOUT ]; do
+    task=$($ECS_CLI describe-tasks $DEBUG \
+      --cluster $CLUSTER \
+      --tasks $TASK_ARN)
+    LAST_STATUS=$(echo "$task" | jq -r ".tasks[0].lastStatus")
+    if [ $LAST_STATUS == "STOPPED" ]; then
+      echo "Done waiting for task to finish..."
+      EXIT_CODE=$(echo $task | jq -r ".tasks[0].containers[0].exitCode")
+      if [ $EXIT_CODE -eq 0 ]; then
+        echo "Task finished successfully!"
+        count=$TIMEOUT
+      else
+        echo "Task not successful!"
+        echo "Aborting!"
+        exit 1
+      fi
+    else
+      sleep $every
+      count=$(($count + $every))
+    fi
+  done
 }
 
 function waitForDeployment() {
@@ -309,6 +343,9 @@ do
     COMMAND="$2"
     shift
     ;;
+    -w | --wait)
+    WAIT=true
+    ;;
     -e | --exec)
     EXEC=true
     ;;
@@ -352,6 +389,9 @@ else
   if [ $SERVICE == false ]; then
     if [[ "$COMMAND" != false ]]; then
       runTask
+      if [[ $WAIT != false ]]; then
+        waitForTask
+      fi
     fi
   else
     deployService

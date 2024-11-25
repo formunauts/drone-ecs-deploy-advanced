@@ -12,8 +12,8 @@ if [ -z ${PLUGIN_CLUSTER} ]; then
   exit 1
 fi
 
-if [[ -z ${PLUGIN_SERVICES} && -z $PLUGIN_TASKS && -z $PLUGIN_EXEC_COMMANDS ]]; then
-  echo "You must specify either services, tasks or exec_commands (or several of them)"
+if [[ -z ${PLUGIN_EXEC_COMMANDS} && -z ${PLUGIN_PREDEPLOY_TASKS} && -z ${PLUGIN_TASKS} && -z ${PLUGIN_SERVICES} ]]; then
+  echo "You must specify either services, (predeploy_)tasks, or exec_commands (or several of them)"
   exit 1
 fi
 
@@ -22,7 +22,7 @@ if [[ ! -z ${PLUGIN_EXEC_COMMANDS} && -z ${PLUGIN_EXEC_SERVICE} ]]; then
   exit 1
 fi
 
-if [[ ! -z ${PLUGIN_TASKS} && -z ${PLUGIN_TASK_DEFINITION} ]]; then
+if [[ ( ! -z ${PLUGIN_TASKS} || ! -z ${PLUGIN_PREDEPLOY_TASKS} ) && -z ${PLUGIN_TASK_DEFINITION} ]]; then
   echo "You must specify a task definition, when using tasks"
   exit 1
 fi
@@ -38,6 +38,7 @@ fi
 IFS=','
 services=($PLUGIN_SERVICES)
 exec_commands=($PLUGIN_EXEC_COMMANDS)
+predeploy_tasks=($PLUGIN_PREDEPLOY_TASKS)
 tasks=($PLUGIN_TASKS)
 
 # Run commands
@@ -50,6 +51,18 @@ for command in "${!exec_commands[@]}"; do
              -a ${PLUGIN_ROLE} \
              -s ${PLUGIN_EXEC_SERVICE} \
              -C "${exec_commands[$command]}"
+done
+
+# Run pre-deploy tasks
+for command in "${!predeploy_tasks[@]}"; do
+  ecs-deploy $DEBUG --wait \
+             -r ${PLUGIN_REGION} \
+             -c ${PLUGIN_CLUSTER} \
+             -i ${PLUGIN_IMAGE:-latest} \
+             -t ${PLUGIN_TIMEOUT:-300} \
+             -a ${PLUGIN_ROLE} \
+             -d ${PLUGIN_TASK_DEFINITION} \
+             -C "${predeploy_tasks[$command]}"
 done
 
 # Run one-off tasks
