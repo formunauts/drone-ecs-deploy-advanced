@@ -56,13 +56,70 @@ steps:
   ...
 ```
 
+## GitHub Action Usage
+
+This plugin can also be used as a GitHub Action.
+
+### Example Workflow
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to AWS ECS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-central-1
+
+      - name: Deploy to ECS
+        uses: formunauts/drone-ecs-deploy-advanced@v1.3.0
+        with:
+          role: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
+          cluster: my-production-cluster
+          services: my-web-service,my-api-service
+          image: my-registry/my-app:${{ github.sha }}
+```
+
+### Inputs
+
+The action inputs correspond directly to the Drone plugin settings.
+
+| GitHub Action Input | Drone Setting       | Description                                                              |
+| ------------------- | ------------------- | ------------------------------------------------------------------------ |
+| `role`              | `role`              | The AWS IAM role to assume for deployment.                               |
+| `cluster`           | `cluster`           | The name of the ECS cluster.                                             |
+| `region`            | `region`            | The AWS region.                                                          |
+| `services`          | `services`          | A comma-separated list of services to deploy.                            |
+| `image`             | `image`             | The Docker image tag to deploy.                                          |
+| `timeout`           | `timeout`           | Timeout for waiting on deployments and tasks.                            |
+| `task_definition`   | `task_definition`   | The name of the task definition to use for running tasks.                |
+| `predeploy_tasks`   | `predeploy_tasks`   | Comma-separated list of commands to run as one-off tasks before deployment. |
+| `tasks`             | `tasks`             | Comma-separated list of commands to run as one-off tasks.                |
+| `exec_service`      | `exec_service`      | The service to use for executing commands with `--exec`.                 |
+| `exec_commands`     | `exec_commands`     | Comma-separated list of commands to execute in the `exec_service`.       |
+| `debug`             | `debug`             | Enable debug mode.                                                       |
+
 ## Release Process
 
 To build a new docker image of `drone-ecs-deploy-advanced` and push it to the
 Docker hub, use the following commands:
 
 ```sh
-VERSION=1.2.0
+VERSION=1.3.0
 docker build -t "formunauts/drone-ecs-deploy-advanced:$VERSION" .
 docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
 ```
@@ -72,7 +129,7 @@ docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
 See [LICENSE](LICENSE) for full details.
 
 ```
-Copyright (C) 2024 Formunauts GmbH
+Copyright (C) 2025 Formunauts GmbH
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

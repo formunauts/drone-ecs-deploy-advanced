@@ -1,0 +1,62 @@
+name: "Drone ECS Deploy Advanced"
+description: "A GitHub Action to deploy services, run tasks, and execute commands on an AWS ECS cluster."
+author: "Formunauts"
+
+inputs:
+  role:
+    description: "The AWS IAM role to assume for deployment."
+    required: true
+  cluster:
+    description: "The name of the ECS cluster."
+    required: true
+  region:
+    description: "The AWS region."
+    required: false
+    default: "eu-central-1"
+  services:
+    description: "A comma-separated list of services to deploy."
+    required: false
+  image:
+    description: "The Docker image tag to deploy. Used for service deployments and tasks."
+    required: false
+    default: "latest"
+  timeout:
+    description: "Timeout for waiting on deployments and tasks."
+    required: false
+    default: "300"
+  task_definition:
+    description: "The name of the task definition to use for running tasks."
+    required: false
+  predeploy_tasks:
+    description: "Comma-separated list of commands to run as one-off tasks before deployment. Waits for completion."
+    required: false
+  tasks:
+    description: "Comma-separated list of commands to run as one-off tasks. Does not wait for completion."
+    required: false
+  exec_service:
+    description: "The service to use for executing commands with --exec."
+    required: false
+  exec_commands:
+    description: "Comma-separated list of commands to execute in the exec_service container."
+    required: false
+  debug:
+    description: "Enable debug mode."
+    required: false
+    default: "false"
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  env:
+    PLUGIN_ROLE: ${{ inputs.role }}
+    PLUGIN_CLUSTER: ${{ inputs.cluster }}
+    PLUGIN_REGION: ${{ inputs.region }}
+    PLUGIN_SERVICES: ${{ inputs.services }}
+    PLUGIN_IMAGE: ${{ inputs.image }}
+    PLUGIN_TIMEOUT: ${{ inputs.timeout }}
+    PLUGIN_TASK_DEFINITION: ${{ inputs.task_definition }}
+    PLUGIN_PREDEPLOY_TASKS: ${{ inputs.predeploy_tasks }}
+    PLUGIN_TASKS: ${{ inputs.tasks }}
+    PLUGIN_EXEC_SERVICE: ${{ inputs.exec_service }}
+    PLUGIN_EXEC_COMMANDS: ${{ inputs.exec_commands }}
+    PLUGIN_DEBUG: ${{ inputs.debug }}
