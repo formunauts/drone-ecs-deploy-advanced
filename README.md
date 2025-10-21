@@ -86,7 +86,7 @@ jobs:
           aws-region: eu-central-1
 
       - name: Deploy to ECS
-        uses: formunauts/drone-ecs-deploy-advanced@v1.3.0
+        uses: formunauts/drone-ecs-deploy-advanced@v1.3.1
         with:
           role: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
           cluster: my-production-cluster
@@ -115,11 +115,21 @@ The action inputs correspond directly to the Drone plugin settings.
 
 ## Release Process
 
-To build a new docker image of `drone-ecs-deploy-advanced` and push it to the
+Before tagging a new release, make sure to bump the docker image version used
+in `action.yml`:
+```yaml
+...
+runs:
+  using: "docker"
+  image: "docker://formunauts/drone-ecs-deploy-advanced:1.3.1"
+...
+```
+
+When that's done build a new docker image of `drone-ecs-deploy-advanced` and push it to the
 Docker hub, use the following commands:
 
 ```sh
-VERSION=1.3.0
+VERSION=1.3.1
 docker build -t "formunauts/drone-ecs-deploy-advanced:$VERSION" .
 docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
 ```
