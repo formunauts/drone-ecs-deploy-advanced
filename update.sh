@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 DEBUG=""
 
 if [ -z ${PLUGIN_ROLE} ]; then
@@ -35,6 +37,20 @@ if [ "${PLUGIN_DEBUG}" == "true" ]; then
   DEBUG="--debug"
 fi
 
+echo "Assuming role ${PLUGIN_ROLE}..."
+role=$(aws sts assume-role --role-arn "${PLUGIN_ROLE}" --role-session-name "drone-ecs-deploy-advanced-$(date +'%s')")
+export AWS_ACCESS_KEY_ID=$(echo "$role" | jq -r .Credentials.AccessKeyId)
+export AWS_SECRET_ACCESS_KEY=$(echo "$role" | jq -r .Credentials.SecretAccessKey)
+export AWS_SESSION_TOKEN=$(echo "$role" | jq -r .Credentials.SessionToken)
+
+function reset_role() {
+  echo "Resetting assumed role..."
+  unset AWS_ACCESS_KEY_ID
+  unset AWS_SECRET_ACCESS_KEY
+  unset AWS_SESSION_TOKEN
+}
+trap reset_role EXIT
+
 IFS=','
 services=($PLUGIN_SERVICES)
 exec_commands=($PLUGIN_EXEC_COMMANDS)
@@ -48,7 +64,6 @@ for command in "${!exec_commands[@]}"; do
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
-             -a ${PLUGIN_ROLE} \
              -s ${PLUGIN_EXEC_SERVICE} \
              -C "${exec_commands[$command]}"
 done
@@ -60,10 +75,11 @@ for command in "${!predeploy_tasks[@]}"; do
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
-             -a ${PLUGIN_ROLE} \
              -d ${PLUGIN_TASK_DEFINITION} \
              -C "${predeploy_tasks[$command]}"
 done
+
+pids=()
 
 # Run one-off tasks
 for command in "${!tasks[@]}"; do
@@ -72,9 +88,9 @@ for command in "${!tasks[@]}"; do
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
-             -a ${PLUGIN_ROLE} \
              -d ${PLUGIN_TASK_DEFINITION} \
-             -C "${tasks[$command]}"
+             -C "${tasks[$command]}" &
+  pids+=($!)
 done
 
 
@@ -85,6 +101,13 @@ for service in "${!services[@]}"; do
              -c ${PLUGIN_CLUSTER} \
              -i ${PLUGIN_IMAGE} \
              -t ${PLUGIN_TIMEOUT:-300} \
-             -a ${PLUGIN_ROLE} \
-             -s ${services[$service]}
+             -s ${services[$service]} &
+  pids+=($!)
 done
+
+echo "Waiting for all background processes to finish..."
+for pid in "${pids[@]}"; do
+  wait "${pid}"
+done
+
+echo "All commands have been executed."

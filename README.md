@@ -14,6 +14,9 @@ your drone config and additionally the `services` (to update ECS services),
 updating services) and `exec_commands` (for executing commands in the old
 containers before deployment) properties.
 
+**Note on Concurrency:** All `services` and `tasks` are deployed and run
+concurrently to speed up the deployment process.
+
 Each entry in `services` will change the service with the same name, changing
 the image in the task definition and update the service with the new definition.
 
@@ -86,7 +89,7 @@ jobs:
           aws-region: eu-central-1
 
       - name: Deploy to ECS
-        uses: formunauts/drone-ecs-deploy-advanced@v1.3.1
+        uses: formunauts/drone-ecs-deploy-advanced@v1.4.0
         with:
           role: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
           cluster: my-production-cluster
@@ -121,7 +124,7 @@ in `action.yml`:
 ...
 runs:
   using: "docker"
-  image: "docker://formunauts/drone-ecs-deploy-advanced:1.3.1"
+  image: "docker://formunauts/drone-ecs-deploy-advanced:1.4.0"
 ...
 ```
 
@@ -129,7 +132,7 @@ When that's done build a new docker image of `drone-ecs-deploy-advanced` and pus
 Docker hub, use the following commands:
 
 ```sh
-VERSION=1.3.1
+VERSION=1.4.0
 docker build -t "formunauts/drone-ecs-deploy-advanced:$VERSION" .
 docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
 ```
