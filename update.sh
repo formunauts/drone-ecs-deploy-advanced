@@ -39,9 +39,9 @@ fi
 
 echo "Assuming role ${PLUGIN_ROLE}..."
 role=$(aws sts assume-role --role-arn "${PLUGIN_ROLE}" --role-session-name "drone-ecs-deploy-advanced-$(date +'%s')")
-export AWS_ACCESS_KEY_ID=$(echo "$role" | jq -r .Credentials.AccessKeyId)
-export AWS_SECRET_ACCESS_KEY=$(echo "$role" | jq -r .Credentials.SecretAccessKey)
-export AWS_SESSION_TOKEN=$(echo "$role" | jq -r .Credentials.SessionToken)
+export AWS_ACCESS_KEY_ID=$(echo "$role" | jq -r .Credentials.AccessKeyId | xargs)
+export AWS_SECRET_ACCESS_KEY=$(echo "$role" | jq -r .Credentials.SecretAccessKey | xargs)
+export AWS_SESSION_TOKEN=$(echo "$role" | jq -r .Credentials.SessionToken | xargs)
 
 function reset_role() {
   echo "Resetting assumed role..."
