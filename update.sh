@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 DEBUG=""
 
 if [ -z ${PLUGIN_ROLE} ]; then
@@ -65,6 +67,8 @@ for command in "${!predeploy_tasks[@]}"; do
              -C "${predeploy_tasks[$command]}"
 done
 
+pids=()
+
 # Run one-off tasks
 for command in "${!tasks[@]}"; do
   ecs-deploy $DEBUG \
@@ -74,7 +78,8 @@ for command in "${!tasks[@]}"; do
              -t ${PLUGIN_TIMEOUT:-300} \
              -a ${PLUGIN_ROLE} \
              -d ${PLUGIN_TASK_DEFINITION} \
-             -C "${tasks[$command]}"
+             -C "${tasks[$command]}" &
+  pids+=($!)
 done
 
 
@@ -86,5 +91,13 @@ for service in "${!services[@]}"; do
              -i ${PLUGIN_IMAGE} \
              -t ${PLUGIN_TIMEOUT:-300} \
              -a ${PLUGIN_ROLE} \
-             -s ${services[$service]}
+             -s ${services[$service]} &
+  pids+=($!)
 done
+
+echo "Waiting for all background processes to finish..."
+for pid in "${pids[@]}"; do
+  wait "${pid}"
+done
+
+echo "All commands have been executed."

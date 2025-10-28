@@ -14,6 +14,9 @@ your drone config and additionally the `services` (to update ECS services),
 updating services) and `exec_commands` (for executing commands in the old
 containers before deployment) properties.
 
+**Note on Concurrency:** All `services` and `tasks` are deployed and run
+concurrently to speed up the deployment process.
+
 Each entry in `services` will change the service with the same name, changing
 the image in the task definition and update the service with the new definition.
 
