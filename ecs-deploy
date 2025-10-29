@@ -216,16 +216,32 @@ function runTask() {
     printf "Using overrides: %s\n" $overrides
   fi
 
-  task=$($ECS_CLI run-task $DEBUG \
-    --cluster $CLUSTER \
-    --task-definition $TASK_DEFINITION_ARN \
-    --overrides "$overrides")
+  max_retries=3
+  retry_delay=10
+  for i in $(seq 1 $max_retries); do
+    task=$($ECS_CLI run-task $DEBUG \
+      --cluster $CLUSTER \
+      --task-definition $TASK_DEFINITION_ARN \
+      --overrides "$overrides")
 
-  printf "$task\n"
+    printf "Run task response:\n%s\n" "$task"
 
-  TASK_ARN=$(echo "$task" | jq -r ".tasks[0].taskArn")
+    failures=$(echo "$task" | jq '.failures | length')
+    if [ "$failures" -eq 0 ]; then
+      TASK_ARN=$(echo "$task" | jq -r ".tasks[0].taskArn")
+      printf "Successfully started task %s on %s...\n" $TASK_ARN $CLUSTER
+      return 0
+    fi
 
-  printf "Done running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
+    echo "Failed to start task (attempt $i/$max_retries):"
+    echo "$task" | jq '.failures'
+    if [ "$i" -lt "$max_retries" ]; then
+      echo "Retrying in $retry_delay seconds..."
+      sleep $retry_delay
+    fi
+  done
+
+  echo "Could not start task after $max_retries attempts."
 }
 
 function waitForTask() {
