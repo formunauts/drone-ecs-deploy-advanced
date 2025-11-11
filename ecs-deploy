@@ -11,10 +11,14 @@ WAIT=false
 EXEC=false
 IMAGE="latest"
 TASK_DEFINITION=false
+TASK_CPU=""
+TASK_MEMORY=""
 MAX_DEFINITIONS=2
 NEW_DEF=false
 TIMEOUT=90
 DEBUG=""
+SUBNETS=""
+SECURITY_GROUPS=""
 
 function getCurrentTaskDefinition() {
   echo "Getting current task definition..."
@@ -65,6 +69,36 @@ function taskDefinitionJson() {
   echo "Done parsing task definition JSON..."
 }
 
+function taskDefinitionFargateJson() {
+  echo "Generating derived Fargate task definition..."
+
+  if [[ -z "$TASK_CPU" || -z "$TASK_MEMORY" ]]; then
+    echo "Error: --task-cpu and --task-memory are required"
+    exit 1
+  fi
+
+  local new_definition
+  new_definition=$(echo "$TASK_DEFINITION" | jq '.taskDefinition')
+
+  fargate_jq_filter="{
+    family: (.family + \"-fargate\"),
+    taskRoleArn: .taskRoleArn,
+    executionRoleArn: .executionRoleArn,
+    volumes: .volumes,
+    requiresCompatibilities: [\"FARGATE\"],
+    networkMode: \"awsvpc\",
+    cpu: \"${TASK_CPU}\",
+    memory: \"${TASK_MEMORY}\",
+    containerDefinitions: (.containerDefinitions | map(
+      (. + {image: \"${IMAGE}\"}) |
+      del(.portMappings[]?.hostPort, .memory, .memoryReservation, .cpu)
+    ))
+  }"
+
+  NEW_DEF_FARGATE=$(echo "$new_definition" | jq "$fargate_jq_filter")
+  echo "Done generating Fargate task definition..."
+}
+
 function registerNewTaskDefinition() {
   echo "Registering new task definition..."
 
@@ -94,6 +128,35 @@ function registerNewTaskDefinition() {
   echo "Done registering new task definition..."
 }
 
+function registerNewTaskDefinitionFargate() {
+  echo "Registering new derived Fargate task definition..."
+
+  TASK_DEFINITION_FARGATE_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF_FARGATE" \
+                                | jq -r '.taskDefinition.taskDefinitionArn')
+
+  if [[ $MAX_DEFINITIONS -gt 0 ]]; then
+    family_prefix=${TASK_DEFINITION_FARGATE_ARN##*:task-definition/}
+    family_prefix=${family_prefix%*:[0-9]*}
+    task_revisions=$($ECS_CLI list-task-definitions $DEBUG \
+                     --family-prefix $family_prefix \
+                     --status ACTIVE \
+                     --sort ASC)
+    active_revisions=$(echo "$task_revisions" | jq '.taskDefinitionArns | length')
+
+    if [[ $active_revisions -gt $MAX_DEFINITIONS ]]; then
+      last_outdated_index=$(($active_revisions - $MAX_DEFINITIONS - 1))
+      for i in $(seq 0 $last_outdated_index); do
+        outdated_revision=$(echo "$task_revisions" | jq -r ".taskDefinitionArns[$i]")
+        echo "Deregistering outdated task revision: $outdated_revision"
+
+        $ECS_CLI deregister-task-definition $DEBUG --task-definition "$outdated_revision" > /dev/null
+      done
+    fi
+  fi
+
+  echo "Done registering new Fargate task definition..."
+}
+
 function updateTaskDefinition() {
   echo "Updating task definition..."
 
@@ -106,6 +169,55 @@ function updateTaskDefinition() {
   fi
 
   echo "Done updating task definition..."
+}
+
+function updateTaskDefinitionFargate() {
+  echo "Updating Fargate task definition..."
+
+  taskDefinitionFargateJson
+
+  local fargate_family
+  fargate_family=$(echo "$NEW_DEF_FARGATE" | jq -r '.family')
+  local current_def_json
+  current_def_json=$($ECS_CLI describe-task-definition --task-def "$fargate_family" 2>/dev/null || echo "")
+
+  if [[ -n "$current_def_json" ]]; then
+    local current_def
+    current_def=$(echo "$current_def_json" | jq '.taskDefinition')
+
+    local current_def_filtered
+    current_def_filtered=$(echo "$current_def" | jq "{
+      family: .family,
+      taskRoleArn: .taskRoleArn,
+      executionRoleArn: .executionRoleArn,
+      volumes: .volumes,
+      requiresCompatibilities: .requiresCompatibilities,
+      networkMode: .networkMode,
+      cpu: .cpu,
+      memory: .memory,
+      containerDefinitions: (.containerDefinitions | map(
+        del(.portMappings[]?.hostPort, .memory, .memoryReservation, .cpu)
+      ))
+    }")
+
+    local sorted_new
+    sorted_new=$(echo "$NEW_DEF_FARGATE" | jq -S .)
+    local sorted_current
+    sorted_current=$(echo "$current_def_filtered" | jq -S .)
+
+    if [[ "$sorted_new" == "$sorted_current" ]]; then
+      echo "Fargate task definition has not changed. Skipping registration."
+      TASK_DEFINITION_FARGATE_ARN=$(echo "$current_def_json" | jq -r '.taskDefinition.taskDefinitionArn')
+      TASK_DEFINITION_FARGATE=$current_def
+      echo "Done updating Fargate task definition..."
+      return
+    fi
+  fi
+
+  registerNewTaskDefinitionFargate
+  TASK_DEFINITION_FARGATE=$NEW_DEF_FARGATE
+
+  echo "Done updating Fargate task definition..."
 }
 
 function deployService() {
@@ -201,31 +313,107 @@ execCommand() {
   fi
 }
 
+function getNetworkConfigurationFromASG() {
+  echo "Getting network configuration from Auto Scaling Group..."
+
+  container_instance_arn=$($ECS_CLI list-container-instances --cluster "$CLUSTER" | jq -r '.containerInstanceArns[0]')
+  if [[ -z "$container_instance_arn" || "$container_instance_arn" == "null" ]]; then
+    echo "Error: No container instances found in cluster $CLUSTER to derive network configuration."
+    exit 1
+  fi
+
+  ec2_instance_id=$($ECS_CLI describe-container-instances --cluster "$CLUSTER" --container-instances "$container_instance_arn" | jq -r '.containerInstances[0].ec2InstanceId')
+  if [[ -z "$ec2_instance_id" || "$ec2_instance_id" == "null" ]]; then
+    echo "Error: Could not get EC2 instance ID for container instance $container_instance_arn."
+    exit 1
+  fi
+
+  asg_name=$($AWS_CLI ec2 describe-instances --instance-ids "$ec2_instance_id" --query "Reservations[].Instances[].Tags[?Key=='aws:autoscaling:groupName'].Value" --output text)
+  if [[ -z "$asg_name" ]]; then
+    echo "Warning: Could not find Auto Scaling Group for instance $ec2_instance_id. Falling back to instance network configuration."
+    instance_details=$($AWS_CLI ec2 describe-instances --instance-ids "$ec2_instance_id")
+    SUBNETS=$(echo "$instance_details" | jq -r '.Reservations[0].Instances[0].SubnetId')
+    SECURITY_GROUPS=$(echo "$instance_details" | jq -r '.Reservations[0].Instances[0].SecurityGroups | map(.GroupId) | join(",")')
+    if [[ -z "$SUBNETS" || -z "$SECURITY_GROUPS" ]]; then
+        echo "Error: Could not derive subnet and security groups from instance $ec2_instance_id."
+        exit 1
+    fi
+    echo "Done getting network configuration."
+    return
+  fi
+
+  asg_details=$($AWS_CLI --output json autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$asg_name")
+  SUBNETS=$(echo "$asg_details" | jq -r '.AutoScalingGroups[0].VPCZoneIdentifier')
+
+  # Security groups can be in launch config or launch template
+  launch_config_name=$(echo "$asg_details" | jq -r '.AutoScalingGroups[0].LaunchConfigurationName')
+  launch_template_obj=$(echo "$asg_details" | jq -r '.AutoScalingGroups[0].LaunchTemplate')
+
+  if [[ "$launch_config_name" != "null" ]]; then
+    SECURITY_GROUPS=$($AWS_CLI --output json autoscaling describe-launch-configurations --launch-configuration-names "$launch_config_name" | jq -r '.LaunchConfigurations[0].SecurityGroups | join(",")')
+  elif [[ "$launch_template_obj" != "null" && "$launch_template_obj" != "{}" ]]; then
+    lt_id=$(echo "$launch_template_obj" | jq -r '.LaunchTemplateId')
+    lt_version=$(echo "$launch_template_obj" | jq -r '.Version')
+
+    lt_data=$($AWS_CLI --output json ec2 describe-launch-template-versions --launch-template-id "$lt_id" --versions "$lt_version" | jq '.LaunchTemplateVersions[0].LaunchTemplateData')
+
+    sgs=$(echo "$lt_data" | jq -r '.SecurityGroupIds | join(",")')
+    if [[ "$sgs" == "null" || -z "$sgs" ]]; then
+        sgs=$(echo "$lt_data" | jq -r '.NetworkInterfaces[0].SecurityGroupIds | join(",")')
+    fi
+    SECURITY_GROUPS=$sgs
+  else
+     echo "Error: Could not determine security groups from ASG. Neither launch configuration nor launch template found."
+     exit 1
+  fi
+
+  if [[ -z "$SUBNETS" || "$SUBNETS" == "null" || -z "$SECURITY_GROUPS" || "$SECURITY_GROUPS" == "null" ]]; then
+      echo "Error: Could not derive subnets and security groups from ASG $asg_name."
+      exit 1
+  fi
+
+  echo "Done getting network configuration."
+}
+
 function runTask() {
-  printf "Running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
+  printf "Running task %s on %s...\n" $TASK_DEFINITION_FARGATE_ARN $CLUSTER
   
+  local task_def_obj=$TASK_DEFINITION_FARGATE
+  if [[ $(echo "$task_def_obj" | jq 'has("taskDefinition")') == "true" ]]; then
+    task_def_obj=$(echo "$task_def_obj" | jq '.taskDefinition')
+  fi
+
   override_filters="containerOverrides: (.containerDefinitions | map({ name: .name, command: [\"${COMMAND}\"] })), taskRoleArn: .taskRoleArn, executionRoleArn: .executionRoleArn"
-  
-  if [[ $DEBUG != "" ]]; then
-    printf "JQ command: .taskDefinition | {%s}\n" $override_filters 
-  fi
-  
-  overrides=$(echo "$TASK_DEFINITION" | jq ".taskDefinition | {$override_filters}")
 
   if [[ $DEBUG != "" ]]; then
-    printf "Using overrides: %s\n" $overrides
+    printf "JQ command: . | {%s}\n" "$override_filters"
   fi
 
+  overrides=$(echo "$task_def_obj" | jq "{${override_filters}}")
+
+  if [[ $DEBUG != "" ]]; then
+    printf "Using overrides: %s\n" "$overrides"
+  fi
+
+  getNetworkConfigurationFromASG
+  if [[ -z "$SUBNETS" || -z "$SECURITY_GROUPS" ]]; then
+      echo "Error: --subnets and --security-groups could not be determined."
+      exit 1
+  fi
+
+  # shellcheck disable=SC2086
   task=$($ECS_CLI run-task $DEBUG \
-    --cluster $CLUSTER \
-    --task-definition $TASK_DEFINITION_ARN \
+    --cluster "$CLUSTER" \
+    --task-definition "$TASK_DEFINITION_FARGATE_ARN" \
+    --launch-type FARGATE \
+    --network-configuration "awsvpcConfiguration={subnets=[${SUBNETS}],securityGroups=[${SECURITY_GROUPS}]}" \
     --overrides "$overrides")
 
   printf "$task\n"
 
   TASK_ARN=$(echo "$task" | jq -r ".tasks[0].taskArn")
 
-  printf "Done running task %s on %s...\n" $TASK_DEFINITION_ARN $CLUSTER
+  printf "Done running task %s on %s...\n" $TASK_DEFINITION_FARGATE_ARN $CLUSTER
 }
 
 function waitForTask() {
@@ -255,6 +443,12 @@ function waitForTask() {
       count=$(($count + $every))
     fi
   done
+
+  if [ $LAST_STATUS != "STOPPED" ]; then
+      echo "Timeout reached while waiting for task to finish!"
+      echo "Continuing anyway..."
+  fi
+  printf "Done waiting for task %s on %s to finish...\n" $TASK_ARN $CLUSTER
 }
 
 function waitForDeployment() {
@@ -331,6 +525,14 @@ do
     TASK_DEFINITION="$2"
     shift
     ;;
+    --task-cpu)
+    TASK_CPU="$2"
+    shift
+    ;;
+    --task-memory)
+    TASK_MEMORY="$2"
+    shift
+    ;;
     -t|--timeout)
     TIMEOUT="$2"
     shift
@@ -351,10 +553,11 @@ do
 done
 
 echo "---"
-printf "Starting deployment of %s to ECS...\n" $SERVICE 
 
 if [[ $SERVICE != false && "$COMMAND" != false && $EXEC != false ]]; then
+  printf "Executing command '%s' in ECS...\n" "$COMMAND"
   execCommand
+  printf "Everything done for exec command %s. Have a nice day! \n" "$COMMAND"
 else
   getCurrentTaskDefinition
   printf "Current task definition ARN: %s\n" $TASK_DEFINITION_ARN
@@ -364,17 +567,22 @@ else
 
   if [ $SERVICE == false ]; then
     if [[ "$COMMAND" != false ]]; then
+      printf "Running '%s' as task in ECS...\n" "$COMMAND"
+      updateTaskDefinitionFargate
+      printf "New Fargate task definition ARN: %s\n" $TASK_DEFINITION_FARGATE_ARN
       runTask
       if [[ $WAIT != false ]]; then
         waitForTask
       fi
+      printf "Everything done for command '%s'. Have a nice day! \n" "$COMMAND"
     fi
   else
+    printf "Starting deployment of %s to ECS...\n" $SERVICE
     deployService
     waitForDeployment
+    printf "Everything done for service %s. Have a nice day! \n" $SERVICE
   fi
 fi
 
-printf "Everything done for %s. Have a nice day! \n" $SERVICE
 
 exit 0

@@ -24,9 +24,15 @@ if [[ ! -z ${PLUGIN_EXEC_COMMANDS} && -z ${PLUGIN_EXEC_SERVICE} ]]; then
   exit 1
 fi
 
-if [[ ( ! -z ${PLUGIN_TASKS} || ! -z ${PLUGIN_PREDEPLOY_TASKS} ) && -z ${PLUGIN_TASK_DEFINITION} ]]; then
-  echo "You must specify a task definition, when using tasks"
-  exit 1
+if [[ (! -z ${PLUGIN_TASKS} || ! -z ${PLUGIN_PREDEPLOY_TASKS}) ]]; then
+  if [[ -z ${PLUGIN_TASK_DEFINITION} ]]; then
+    echo "You must specify a task definition, when using tasks"
+    exit 1
+  fi
+  if [[ -z ${PLUGIN_TASK_CPU} || -z ${PLUGIN_TASK_MEMORY} ]]; then
+    echo "You must specify a task cpu and task memory, when using tasks"
+    exit 1
+  fi
 fi
 
 if [ -z ${PLUGIN_REGION} ]; then
@@ -76,6 +82,8 @@ for command in "${!predeploy_tasks[@]}"; do
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
              -d ${PLUGIN_TASK_DEFINITION} \
+             --task-cpu ${PLUGIN_TASK_CPU} \
+             --task-memory ${PLUGIN_TASK_MEMORY} \
              -C "${predeploy_tasks[$command]}"
 done
 
@@ -89,6 +97,8 @@ for command in "${!tasks[@]}"; do
              -i ${PLUGIN_IMAGE:-latest} \
              -t ${PLUGIN_TIMEOUT:-300} \
              -d ${PLUGIN_TASK_DEFINITION} \
+             --task-cpu ${PLUGIN_TASK_CPU} \
+             --task-memory ${PLUGIN_TASK_MEMORY} \
              -C "${tasks[$command]}" &
   pids+=($!)
 done

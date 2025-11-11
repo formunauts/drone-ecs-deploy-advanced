@@ -34,6 +34,11 @@ they will be executed. This can be used to specify commands that need to run
 sequentially and complete successfully before any `services` are deployed or
 `tasks` or `predeploy_tasks` are started.
 
+All one-off tasks (`tasks` and `predeploy_tasks`) are run on AWS Fargate.
+When using them, you must also specify `task_cpu` and `task_memory`. The plugin
+will automatically discover the required network configuration (subnets and
+security groups) from your ECS cluster's Auto Scaling Group.
+
 ```yaml
 steps:
   ...
@@ -48,6 +53,8 @@ steps:
     exec_commands:
       - ./prepare.sh
     task_definition: <task-definition-name>
+    task_cpu: 1024
+    task_memory: 2048
     predeploy_tasks:
       - ./predeploy.sh
     services:
@@ -115,6 +122,8 @@ The action inputs correspond directly to the Drone plugin settings.
 | `exec_service`      | `exec_service`      | The service to use for executing commands with `--exec`.                 |
 | `exec_commands`     | `exec_commands`     | Comma-separated list of commands to execute in the `exec_service`.       |
 | `debug`             | `debug`             | Enable debug mode.                                                       |
+| `task_cpu`          | `task_cpu`          | The number of CPU units to use for the Fargate task (e.g., 1024).        |
+| `task_memory`       | `task_memory`       | The amount of memory (in MiB) to use for the Fargate task (e.g., 2048).  |
 
 ## Release Process
 
