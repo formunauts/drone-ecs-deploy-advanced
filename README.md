@@ -96,7 +96,7 @@ jobs:
           aws-region: eu-central-1
 
       - name: Deploy to ECS
-        uses: formunauts/drone-ecs-deploy-advanced@v1.4.1
+        uses: formunauts/drone-ecs-deploy-advanced@v1.5.0
         with:
           role: ${{ secrets.AWS_IAM_ROLE_TO_ASSUME }}
           cluster: my-production-cluster
@@ -133,7 +133,7 @@ in `action.yml`:
 ...
 runs:
   using: "docker"
-  image: "docker://formunauts/drone-ecs-deploy-advanced:1.4.1"
+  image: "docker://formunauts/drone-ecs-deploy-advanced:1.5.0"
 ...
 ```
 
@@ -141,7 +141,7 @@ When that's done build a new docker image of `drone-ecs-deploy-advanced` and pus
 Docker hub, use the following commands:
 
 ```sh
-VERSION=1.4.1
+VERSION=1.5.0
 docker build -t "formunauts/drone-ecs-deploy-advanced:$VERSION" .
 docker push "formunauts/drone-ecs-deploy-advanced:$VERSION"
 ```

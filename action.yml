@@ -52,7 +52,7 @@ inputs:
 
 runs:
   using: "docker"
-  image: "docker://formunauts/drone-ecs-deploy-advanced:1.4.1"
+  image: "docker://formunauts/drone-ecs-deploy-advanced:1.5.0"
   env:
     PLUGIN_ROLE: ${{ inputs.role }}
     PLUGIN_CLUSTER: ${{ inputs.cluster }}
