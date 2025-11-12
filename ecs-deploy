@@ -99,14 +99,17 @@ function taskDefinitionFargateJson() {
   echo "Done generating Fargate task definition..."
 }
 
-function registerNewTaskDefinition() {
+function registerTaskDefinition() {
+  local def_json=$1
+  local -n arn_variable_ref=$2 # nameref to the variable that will store the ARN
+
   echo "Registering new task definition..."
 
-  TASK_DEFINITION_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF" \
+  arn_variable_ref=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$def_json" \
                         | jq -r '.taskDefinition.taskDefinitionArn')
 
   if [[ $MAX_DEFINITIONS -gt 0 ]]; then
-    family_prefix=${TASK_DEFINITION_ARN##*:task-definition/}
+    family_prefix=${arn_variable_ref##*:task-definition/}
     family_prefix=${family_prefix%*:[0-9]*}
     task_revisions=$($ECS_CLI list-task-definitions $DEBUG \
                      --family-prefix $family_prefix \
@@ -128,43 +131,13 @@ function registerNewTaskDefinition() {
   echo "Done registering new task definition..."
 }
 
-function registerNewTaskDefinitionFargate() {
-  echo "Registering new derived Fargate task definition..."
-
-  TASK_DEFINITION_FARGATE_ARN=$($ECS_CLI register-task-definition $DEBUG --cli-input-json "$NEW_DEF_FARGATE" \
-                                | jq -r '.taskDefinition.taskDefinitionArn')
-
-  if [[ $MAX_DEFINITIONS -gt 0 ]]; then
-    family_prefix=${TASK_DEFINITION_FARGATE_ARN##*:task-definition/}
-    family_prefix=${family_prefix%*:[0-9]*}
-    task_revisions=$($ECS_CLI list-task-definitions $DEBUG \
-                     --family-prefix $family_prefix \
-                     --status ACTIVE \
-                     --sort ASC)
-    active_revisions=$(echo "$task_revisions" | jq '.taskDefinitionArns | length')
-
-    if [[ $active_revisions -gt $MAX_DEFINITIONS ]]; then
-      last_outdated_index=$(($active_revisions - $MAX_DEFINITIONS - 1))
-      for i in $(seq 0 $last_outdated_index); do
-        outdated_revision=$(echo "$task_revisions" | jq -r ".taskDefinitionArns[$i]")
-        echo "Deregistering outdated task revision: $outdated_revision"
-
-        $ECS_CLI deregister-task-definition $DEBUG --task-definition "$outdated_revision" > /dev/null
-      done
-    fi
-  fi
-
-  echo "Done registering new Fargate task definition..."
-}
-
 function updateTaskDefinition() {
   echo "Updating task definition..."
 
   taskDefinitionJson
 
   if [[ $NEW_DEF != false ]]; then
-    registerNewTaskDefinition
-
+    registerTaskDefinition "$NEW_DEF" TASK_DEFINITION_ARN
     TASK_DEFINITION=$NEW_DEF
   fi
 
@@ -172,7 +145,7 @@ function updateTaskDefinition() {
 }
 
 function updateTaskDefinitionFargate() {
-  echo "Updating Fargate task definition..."
+  echo "Updating derived Fargate task definition..."
 
   taskDefinitionFargateJson
 
@@ -214,10 +187,10 @@ function updateTaskDefinitionFargate() {
     fi
   fi
 
-  registerNewTaskDefinitionFargate
+  registerTaskDefinition "$NEW_DEF_FARGATE" TASK_DEFINITION_FARGATE_ARN
   TASK_DEFINITION_FARGATE=$NEW_DEF_FARGATE
 
-  echo "Done updating Fargate task definition..."
+  echo "Done updating derived Fargate task definition..."
 }
 
 function deployService() {
