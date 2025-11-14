@@ -43,10 +43,16 @@ inputs:
     description: "Enable debug mode."
     required: false
     default: "false"
+  task_cpu:
+    description: "CPU units for Fargate task (e.g., 1024)."
+    required: false
+  task_memory:
+    description: "Memory for Fargate task (e.g., 2048)."
+    required: false
 
 runs:
   using: "docker"
-  image: "docker://formunauts/drone-ecs-deploy-advanced:1.4.1"
+  image: "docker://formunauts/drone-ecs-deploy-advanced:1.5.0"
   env:
     PLUGIN_ROLE: ${{ inputs.role }}
     PLUGIN_CLUSTER: ${{ inputs.cluster }}
@@ -60,3 +66,5 @@ runs:
     PLUGIN_EXEC_SERVICE: ${{ inputs.exec_service }}
     PLUGIN_EXEC_COMMANDS: ${{ inputs.exec_commands }}
     PLUGIN_DEBUG: ${{ inputs.debug }}
+    PLUGIN_TASK_CPU: ${{ inputs.task_cpu }}
+    PLUGIN_TASK_MEMORY: ${{ inputs.task_memory }}
